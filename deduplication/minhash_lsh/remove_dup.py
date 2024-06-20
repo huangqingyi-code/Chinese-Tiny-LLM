@@ -3,6 +3,7 @@ import os
 import multiprocessing
 import pickle
 import json
+import shutil
 
 def remove_dup(file_path, dup_line_id_path,output_path):
     with open(dup_line_id_path, 'rb') as f:
@@ -13,7 +14,9 @@ def remove_dup(file_path, dup_line_id_path,output_path):
                 fw.write(line)
 
 def remove_dup_in_dir(input_dir, dup_line_id_dir, output_dir, num_workers):
-    os.makedirs(output_dir, exist_ok=True)
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir)
     pool = multiprocessing.Pool(processes=num_workers)
     for file_name in os.listdir(input_dir):
         file_path = os.path.join(input_dir, file_name)

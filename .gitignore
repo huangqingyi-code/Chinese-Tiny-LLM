@@ -1,0 +1,8 @@
+.DS_Store
+.idea
+__pycache__/
+.vscode/
+*.pyc
+run_sql_test.sql
+venv
+data

@@ -12,9 +12,10 @@ from datetime import datetime
 from bad_url_words import STRICT_BAD_URL_WORDS, HARD_BAD_URL_WORDS
 from collections import Counter
 from utils import Trie, remove_url_head
+import gzip
 
 
-CONTENT_FIELD = "raw_content"
+CONTENT_FIELD = "text"
 
 def unify_format(text):
     # This rule needs to detect Chinese character'【】', therefore done before data format unification
@@ -364,31 +365,33 @@ def filter_single_line(line, index, args, fo, fl, forbidden_urls):
         return False
 
     # Check whether the text contains the urls in the blacklists, and returns the judgment and the text after removing the links
-    try:
-        retain_or_not, url_filtered_text, flag = url_filter(line1, forbidden_urls)
-    except:
-        errMsg["except"] = "url_filter"
-        json_line = json.dumps(errMsg, ensure_ascii=False)
-        fl.write(json_line + '\n')
-        return False
-    line1[CONTENT_FIELD] = url_filtered_text
-    if not retain_or_not:
-        errMsg["dump"] = "url_filter"
-        errMsg["flag"] = flag
-        json_line = json.dumps(errMsg, ensure_ascii=False)
-        fl.write(json_line + '\n')
-        return False
+    # try:
+    #     retain_or_not, url_filtered_text, flag = url_filter(line1, forbidden_urls)
+    # except:
+    #     errMsg["except"] = "url_filter"
+    #     json_line = json.dumps(errMsg, ensure_ascii=False)
+    #     fl.write(json_line + '\n')
+    #     return False
+    # line1[CONTENT_FIELD] = url_filtered_text
+    # if not retain_or_not:
+    #     errMsg["dump"] = "url_filter"
+    #     errMsg["flag"] = flag
+    #     json_line = json.dumps(errMsg, ensure_ascii=False)
+    #     fl.write(json_line + '\n')
+    #     return False
 
 
     errMsg["text"] = text
     try:
-        retain_or_not, flag = self_defined_rules(url_filtered_text)
+        retain_or_not, flag = self_defined_rules(unified_text)
     except:
         errMsg["except"] = "self_defined_rules"
         json_line = json.dumps(errMsg, ensure_ascii=False)
         fl.write(json_line + '\n')
         return False
     if not retain_or_not:
+        if "Word count less than 50 or larger than 10000" in flag.keys():
+            errMsg["text"] = ""
         errMsg["dump"] = "self_defined_rules"
         errMsg["flag"] = flag
         json_line = json.dumps(errMsg, ensure_ascii=False)
@@ -396,7 +399,7 @@ def filter_single_line(line, index, args, fo, fl, forbidden_urls):
         return False
     
     try:
-        retain_or_not, flag = ccnet_rules(url_filtered_text, args.fasttext_model_dir)
+        retain_or_not, flag = ccnet_rules(unified_text, args.fasttext_model_dir)
     except:
         errMsg["except"] = "ccnet_rules"
         json_line = json.dumps(errMsg, ensure_ascii=False)
@@ -432,12 +435,10 @@ def filter_single_line(line, index, args, fo, fl, forbidden_urls):
 
 def filter_dataset(args):
     file_paths = []
-    with open(args.input_data, 'r') as f:
-        for line in f:
-            file_path = line.strip()
-            if file_path != "":
-                file_paths.append(file_path)
-    pool = multiprocessing.Pool(args.workers)
+    for file in os.listdir(args.input_dir):
+        if file.startswith("zh"):
+            file_paths.append(os.path.join(args.input_dir,file))
+
     output_dir = args.output_dir
     log_dir = args.log_dir
     success_dir = args.success_dir
@@ -450,9 +451,8 @@ def filter_dataset(args):
         output_path = os.path.join(output_dir, file_name)
         log_path = os.path.join(log_dir, file_name)
         sucess_path = os.path.join(success_dir, file_name)
-        pool.apply_async(filter_one_file, (file_path, output_path, log_path, sucess_path, args))
-    pool.close()
-    pool.join()
+        filter_one_file(file_path, output_path, log_path, sucess_path, args)
+
 
 def filter_one_file(file_path, output_file_path, log_file_path, sucess_path, args):
     url_path = args.bad_url_dir
@@ -470,25 +470,25 @@ def filter_one_file(file_path, output_file_path, log_file_path, sucess_path, arg
             continue
         except NotADirectoryError as e:
             continue
-    with open(file_path, 'r') as f, open(output_file_path, 'wt', encoding='UTF-8') as fo, open(log_file_path, 'wt', encoding='UTF-8') as fl:
+    with gzip.open(file_path, 'rt',encoding="utf-8") as f, open(output_file_path, 'wt', encoding='UTF-8') as fo, open(log_file_path, 'wt', encoding='UTF-8') as fl:
         sdict = {'start': datetime.now().isoformat(), "fpath": file_path}
         jsl = json.dumps(sdict)
         fl.write(f"{jsl}\n")
-        try:
-            for index, line in enumerate(f):
-                filter_single_line(line, index, args, fo, fl, forbidden_urls_trie)
-        except Exception as e:
-            rule = "unknow type"
-            try:
-                line1 = json.loads(line)
-            except Exception as e:
-                dic = {"index": index, "except": "json load fail"}
-                jsl = json.dumps(dic, ensure_ascii=False)
-                fl.write(jsl + "\n")
-            else:
-                dic = {"index": index, "except": "unknown", "lines": line1[CONTENT_FIELD]}
-                jsl = json.dumps(dic, ensure_ascii=False)
-                fl.write(jsl + "\n")
+        for index, line in enumerate(f):
+            filter_single_line(line, index, args, fo, fl, forbidden_urls_trie)
+            # try:
+            #     filter_single_line(line, index, args, fo, fl, forbidden_urls_trie)
+            # except:
+            #     try:
+            #         line1 = json.loads(line)
+            #     except Exception as e:
+            #         dic = {"index": index, "except": "json load fail"}
+            #         jsl = json.dumps(dic, ensure_ascii=False)
+            #         fl.write(jsl + "\n")
+            #     else:
+            #         dic = {"index": index, "except": "unknown", "lines": line1[CONTENT_FIELD]}
+            #         jsl = json.dumps(dic, ensure_ascii=False)
+            #         fl.write(jsl + "\n") 
         edict = {'end': datetime.now().isoformat()}
         jsl = json.dumps(edict)
         fl.write(f"{jsl}\n")
@@ -499,9 +499,9 @@ def filter_one_file(file_path, output_file_path, log_file_path, sucess_path, arg
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--input_data", default='data_list_final.txt', help="Dataset input directory.")
-    parser.add_argument("--bad_url_dir", default='dest',help="Folder directory of url blacklists")
-    parser.add_argument("--fasttext_model_dir", default='lid.176.bin', help="Fasttext model directory")
+    parser.add_argument("--input_dir", default='data_list_final.txt', help="Dataset input directory.")
+    parser.add_argument("--bad_url_dir", default='filter/dest',help="Folder directory of url blacklists")
+    parser.add_argument("--fasttext_model_dir", default='filter/lid.176.bin', help="Fasttext model directory")
     parser.add_argument("--cn_bad_words_dir", default='cn_bad_words.txt', help="Another chinese bad words list file path.")
 
     parser.add_argument("--output_dir", default='/root/data/filter_data_dir',help="Output file directory.")
